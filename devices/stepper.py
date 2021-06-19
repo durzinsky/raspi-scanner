@@ -4,6 +4,50 @@ from gpiozero import Device, DigitalOutputDevice
 from gpiozero.threads import GPIOThread
 
 class StepperMotor(Device):
+    """
+    GPIO output device to control a stepper motor.
+
+    Each stepper coil (usually 4) is attached to its own DigitalOutputDevice to turn it on and off.
+    The StepperMotor then switches the coils in the correct sequence in order to make the motor
+    actually rotate in one direction or the other.
+
+    There are two possible sequences. With half_steps=False, exactly one coil will be active at a time
+    and a step moves to the next coil.
+        (1, 0, 0, 0)
+        (0, 1, 0, 0)
+        (0, 0, 1, 0)
+        (0, 0, 0, 1)
+    With half_steps=True, additinal steps will be inserted into the sequence with two consecutive coils
+    active concurrently, which moves the motor into an intermediate position.
+        (1, 0, 0, 0)
+        (1, 1, 0, 0)
+        (0, 1, 0, 0)
+        (0, 1, 1, 0)
+        (0, 0, 1, 0)
+        (0, 0, 1, 1)
+        (0, 0, 0, 1)
+        (1, 0, 0, 1)
+
+    While it is possible to set a value for all coils directly, e.g.
+        motor = StepperMotor((18, 23, 24, 25))
+        motor.value = (1,0,0,0)
+    it is recommended to use the position property instead
+        motor.position = 0
+    Changing the value directly will not be recognised as a change of its position. Calling forward(),
+    backward() or setting a new position will just continue with the value corresponding to the new
+    position, independent from any value set directly.
+
+    It does not make much sense to enable opposing coils simultaniously, but the class will not prevent
+    you drom doing so.
+
+    The StepperMotor will disable all outputs initially (value = (0,0,0,0)). When setting a value or
+    position, calling on(), forward() or backward() will activate coils independent from the actual
+    physical position of the stepper, since we cannot read that anyways. The physical motor will snap
+    into some position, possibly moving forward or backward slightly.
+
+    The design of this class is based on gpiozero.RGBLED.
+    """
+
     def __init__(self, pins, *, half_steps=False, pin_factory=None):
         self._coils = tuple(
             DigitalOutputDevice(pin, pin_factory=pin_factory) for pin in pins)
@@ -43,7 +87,7 @@ class StepperMotor(Device):
                 raise OutputDeviceBadValue(
                     'each component must be 0 or 1')
         self._stop_move()
-        # TODO: update _position if value matches any?
+        # TODO: update _position if value matches any? Should we throw if it matches none?
         for coil, v in zip(self._coils, value):
             coil.value = v
 
@@ -104,7 +148,8 @@ class StepperMotor(Device):
             sequence = cycle((0, ))
         else:
             sequence = range(n)
-        # setting c._controller will make c.__del__ call c._controller._stop_blink()
+        # setting c._controller will make c.__del__ call c._controller._stop_blink(), which obviously
+        # does not exist, because we called it _stop_move().
         #for c in self._coils:
         #    c._controller = self
         for x in sequence:
